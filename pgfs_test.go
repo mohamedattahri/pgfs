@@ -1,0 +1,428 @@
+package pgfs
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
+	"io"
+	"io/fs"
+	"log"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"sort"
+	"testing"
+	"time"
+
+	_ "embed" // Testing files
+
+	_ "github.com/jackc/pgx/v5/stdlib" // Postgres driver
+)
+
+var TestDB *sql.DB
+
+//go:embed testing/gopher.png
+var TestBytes []byte
+
+// TestBytesSHA256 is the SHA-256 of the test bytes.
+var TestBytesSHA256 []byte
+
+func init() {
+	digest := sha256.Sum256(TestBytes)
+	TestBytesSHA256 = digest[:sha256.Size]
+}
+
+func connect(url string) (*sql.DB, error) {
+	var db *sql.DB
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	log.Printf("Connecting to database: %s", url)
+	db, err := sql.Open("pgx", url)
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		var (
+			interval = 2 * time.Second
+			retries  int
+		)
+		for ctx.Err() == nil {
+			if err := db.Ping(); err == nil {
+				cancel()
+				break
+			}
+			retries++
+			log.Printf("(#%d) database not accessible. Retrying in %s...", retries, interval.String())
+			time.Sleep(interval)
+		}
+	}()
+
+	<-ctx.Done()
+	if err := ctx.Err(); err != context.Canceled {
+		log.Fatalf("unable to connect to database: %v", err)
+	}
+	return db, nil
+}
+
+func migrate(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := MigrateUp(tx); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func reset(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := MigrateDown(tx); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func withFS(t *testing.T, fn func(fsys *FS)) {
+	tx, err := TestDB.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			t.Log(err)
+		}
+	})
+
+	fsys, err := New(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fn(fsys)
+
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createFile(t *testing.T, fsys *FS, name, contentType string) {
+	w, err := fsys.Create(name, contentType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(TestBytes); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFSStat(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		name := GenerateUUID()
+		contentType := "image/png"
+		createFile(t, fsys, name, contentType)
+
+		info, err := fsys.Stat(name)
+		if err != nil {
+			t.Fatal("error getting info on created file", err)
+		}
+
+		if info.Name() != name {
+			t.Error("names don't match. Wanted:", name, "Got:", info.Name())
+		}
+		if info.Size() != int64(len(TestBytes)) {
+			t.Error("sizes don't match. Wanted:", len(TestBytes), "Got:", info.Size())
+		}
+		if info.ModTime().IsZero() {
+			t.Error("time is zero")
+		}
+
+		fi, ok := info.(FileInfo)
+		if !ok {
+			t.Fatal("info.Sys is not of type *Sys")
+		}
+
+		if fi.ContentType() != contentType {
+			t.Error("content types don't match. Wanted", contentType, "Got", fi.ContentType())
+		}
+		if fi.OID() == 0 {
+			t.Error("OID should not be nil")
+		}
+		if !bytes.Equal(fi.ContentSHA256(), TestBytesSHA256) {
+			t.Error("SHA256 digests don't match")
+		}
+	})
+}
+
+func TestFileRead(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		name := GenerateUUID()
+		createFile(t, fsys, name, BinaryType)
+
+		f, err := fsys.Open(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		b, err := io.ReadAll(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !bytes.Equal(b, TestBytes) {
+			t.Log(string(b), string(TestBytes))
+			t.Fatal("bytes don't match")
+		}
+	})
+}
+
+func TestReadFile(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		name := GenerateUUID()
+		createFile(t, fsys, name, BinaryType)
+
+		b, err := fsys.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !bytes.Equal(b, TestBytes) {
+			t.Fatal("bytes don't match")
+		}
+	})
+}
+
+func TestFSRemoveNotExist(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		err := fsys.Remove(GenerateUUID())
+		if err != fs.ErrNotExist {
+			t.Fatal("expected fs.ErrNotExist", err)
+		}
+	})
+}
+
+func TestFSReaddir(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		wanted := make([]string, 0)
+		if result, err := fsys.ReadDir(""); err != nil {
+			t.Fatal(err)
+		} else {
+			for _, item := range result {
+				wanted = append(wanted, item.Name())
+			}
+		}
+
+		const more = 100
+		for i := 0; i < more; i++ {
+			name := GenerateUUID()
+			wanted = append(wanted, name)
+			createFile(t, fsys, name, BinaryType)
+		}
+
+		got, err := fsys.ReadDir("")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(got) != len(wanted) {
+			t.Fatal("number of files don't match", "Wanted", len(wanted), "Got", len(got))
+		}
+
+		// Sort by id ASC.
+		sort.Strings(sort.StringSlice(wanted))
+
+		for i, item := range got {
+			if item.Name() != wanted[i] {
+				t.Fatal("item", i, "don't match", "Wanted", wanted[i], "Got", item.Name())
+			}
+		}
+	})
+}
+
+func TestFSRemove(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		name := GenerateUUID()
+		createFile(t, fsys, name, BinaryType)
+
+		if err := fsys.Remove(name); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestFSStatNotExist(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		_, err := fsys.Stat(GenerateUUID())
+		if err != fs.ErrNotExist {
+			t.Fatal("expected fs.ErrNotExist")
+		}
+	})
+}
+
+func TestFSCreate(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		name := GenerateUUID()
+		contentType := "application/pdf"
+		w, err := fsys.Create(name, contentType)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		n, err := w.Write(TestBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wanted := len(TestBytes); n != wanted {
+			t.Fatalf("short write. Wanted: %d. Got: %d", wanted, n)
+		}
+
+		if err := w.Close(); err != nil {
+			t.Fatalf("error closing writer: %v", err)
+		}
+
+		if _, err := fsys.Stat(name); err != nil {
+			t.Fatal("error getting info on created file", err)
+		}
+	})
+}
+
+func TestFSCreateFileExists(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		name := GenerateUUID()
+		createFile(t, fsys, name, BinaryType)
+
+		_, err := fsys.Create(name, BinaryType)
+		if err != fs.ErrExist {
+			t.Fatal("expected fs.ErrExist. Got", err)
+		}
+	})
+}
+
+func TestServeFileObject(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		name := GenerateUUID()
+		createFile(t, fsys, name, "application/png")
+
+		f, err := fsys.Open(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		ff := f.(*file)
+
+		r := httptest.NewRequest(http.MethodGet, "https://example.com", nil)
+		w := httptest.NewRecorder()
+		ff.ServeHTTP(w, r)
+		resp := w.Result()
+
+		tests := map[string]string{
+			"Content-Type":  ff.info.contentType,
+			"Last-Modified": ff.info.createdAt.Format(http.TimeFormat),
+			"Repr-Digest":   "sha-256=:" + base64.StdEncoding.EncodeToString(ff.info.contentSHA256) + ":",
+			"ETag":          "\"" + hex.EncodeToString(ff.info.contentSHA256) + "\"",
+		}
+		for name, wanted := range tests {
+			got := resp.Header.Get(name)
+			if wanted != got {
+				t.Error("header", name, "Wanted", wanted, "Got", got)
+			}
+		}
+	})
+}
+
+func TestOpenRoot(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		for i := 0; i < 100; i++ {
+			createFile(t, fsys, GenerateUUID(), BinaryType)
+		}
+
+		d, err := fsys.Open("")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		info, err := d.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !info.IsDir() {
+			t.Error("info is not for a dir")
+		}
+
+		if info.Mode() != fs.ModeDir {
+			t.Error("mode is not fs.ModeDir")
+		}
+
+		if info.ModTime().IsZero() {
+			t.Error("invalid mod time")
+		}
+
+		if wanted := 100 * len(TestBytes); info.Size() <= int64(wanted) {
+			t.Error("size is lower than expected", "Got", info.Size(), "Wanted >=", wanted)
+		}
+	})
+}
+
+func TestWalkFunc(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		for i := 0; i < 100; i++ {
+			createFile(t, fsys, GenerateUUID(), BinaryType)
+		}
+
+		seen := 0
+		fs.WalkDir(fsys, "", func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen++
+			return nil
+		})
+
+		if seen < 100 {
+			t.Fatal("saw fewer files than expected")
+		}
+	})
+}
+
+func TestMain(m *testing.M) {
+	connURL := os.Getenv("POSTGRES_URL")
+	if connURL == "" {
+		log.Fatal("POSTGRES_URL env variable is missing or empty")
+	}
+
+	var err error
+	TestDB, err = connect(connURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer TestDB.Close()
+
+	if err := migrate(TestDB); err != nil {
+		log.Fatal(err)
+	}
+	code := m.Run()
+	if err := reset(TestDB); err != nil {
+		log.Fatal(err)
+	}
+
+	os.Exit(code)
+}
