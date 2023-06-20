@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 )
 
+// root is the UUID assigned to the virtual root
+// directory of the file system.
 const root = "00000000-0000-0000-0000-000000000000"
 
 var rootUUID = uuid.MustParse(root)
@@ -34,6 +36,7 @@ type FileInfo interface {
 }
 
 // dir is the [fs.File] of the root directory.
+// It implements [http.File] and [fs.ReadDirFile].
 type dir struct {
 	fsys   *FS
 	cur    int
@@ -41,14 +44,17 @@ type dir struct {
 	closed bool
 }
 
+// Read implements [http.File].
 func (d *dir) Read(p []byte) (int, error) {
 	return 0, io.EOF
 }
 
+// Seek implements [http.File].
 func (d *dir) Seek(offset int64, whence int) (int64, error) {
 	return 0, nil
 }
 
+// Close implements [http.File].
 func (d *dir) Close() error {
 	if d.closed {
 		return fs.ErrClosed
@@ -57,11 +63,12 @@ func (d *dir) Close() error {
 	return nil
 }
 
+// Stat implements [http.File].
 func (d *dir) Stat() (fs.FileInfo, error) {
 	return d.info, nil
 }
 
-// ReadDir implements [http.File].
+// Readdir implements [http.File].
 func (d *dir) Readdir(n int) (entries []fs.FileInfo, err error) {
 	const q = `
 	  SELECT 

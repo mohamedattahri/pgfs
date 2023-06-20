@@ -1,11 +1,3 @@
 {
-  "cSpell.words": [
-    "BYTEA",
-    "creat",
-    "loread",
-    "lowrite",
-    "lseek",
-    "pgfs",
-    "Repr"
-  ]
+  "cSpell.words": ["BYTEA", "loread", "lowrite", "lseek", "pgfs", "Repr"]
 }

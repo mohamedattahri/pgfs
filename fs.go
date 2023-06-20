@@ -229,7 +229,8 @@ func (fsys *FS) Open(name string) (fs.File, error) {
 // name and content type. The caller must close the writer
 // for the operation to complete.
 //
-// Name must be a valid and unique UUID string.
+// Name must be a valid and unique UUID. If an empty string is passed,
+// a random one will be generated and used.
 func (fsys *FS) Create(name, contentType string) (io.WriteCloser, error) {
 	id, err := uuid.Parse(name)
 	if err != nil {
@@ -269,8 +270,8 @@ var (
 
 // ServeFile serves the content of a file over HTTP.
 //
-// If f is a file created by this package, it is served using
-// [http.ServeContent] with the appropriate headers
+// If f is a file created by this package, [http.ServeContent]
+// is used after adding the appropriate headers
 // (ETag, Last-Modified, Content-Type, Repr-Digest).
 func ServeFile(w http.ResponseWriter, r *http.Request, f fs.File) {
 	if handler, ok := f.(http.Handler); ok {

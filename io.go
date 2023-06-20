@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
+// file modes on Postgres.
 const (
 	invRead  = 0x00020000
 	invWrite = 0x00040000
@@ -19,7 +20,7 @@ const (
 // on Postgres.
 type OID uint32
 
-// open returns info and a file descriptor to an existing
+// open returns info and a file descriptor for an existing
 // large object.
 func open(conn Tx, id uuid.UUID, mode int) (info *entry, fd int32, err error) {
 	const q = `
@@ -82,6 +83,8 @@ func create(conn Tx, id uuid.UUID) (oid OID, fd int32, err error) {
 	return
 }
 
+// write is analog to [io.Writer], and writes b
+// in the file fd.
 func write(conn Tx, fd int32, b []byte) (n int, err error) {
 	const q = `SELECT lowrite($1, $2)`
 
@@ -97,6 +100,8 @@ func write(conn Tx, fd int32, b []byte) (n int, err error) {
 	return
 }
 
+// seek is analog to [io.Seeker], and changes the read/write
+// position in fd.
 func seek(conn Tx, fd int32, offset int64, whence int) (n int64, err error) {
 	const q = `SELECT lo_lseek64($1, $2, $3)`
 
@@ -110,6 +115,8 @@ func seek(conn Tx, fd int32, offset int64, whence int) (n int64, err error) {
 	return
 }
 
+// read is analog to [io.Reader], and fills p with len(p)
+// bytes from the file fd.
 func read(conn Tx, fd int32, p []byte) (n int, err error) {
 	const q = `SELECT loread($1, $2)`
 
@@ -125,6 +132,7 @@ func read(conn Tx, fd int32, p []byte) (n int, err error) {
 	return
 }
 
+// close closes the file.
 func close(conn Tx, fd int32) (err error) {
 	const q = `SELECT lo_close($1)`
 
