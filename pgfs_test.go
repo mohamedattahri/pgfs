@@ -329,16 +329,16 @@ type loopingReader struct {
 }
 
 // Read implements [io.Reader].
-func (r *loopingReader) Read(p []byte) (int, error) {
-	n := 0
+func (r *loopingReader) Read(p []byte) (n int, err error) {
 	for n < len(p) {
 		max := len(p) - n
 		if (r.cur + max) > len(r.src) {
 			max = len(r.src) - r.cur
 		}
-		n += copy(p[n:max], r.src[r.cur:r.cur+max])
+		n += copy(p[n:n+max], r.src[r.cur:r.cur+max])
+		r.cur = (r.cur + n) % len(r.src)
 	}
-	return n, nil
+	return
 }
 
 // Test consists of two steps:
