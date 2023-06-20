@@ -8,7 +8,8 @@
 // called "pgfs_metadata". The table can be created by calling [MigrateUp].
 //
 // To prevent orphaned files, the "id" column in "pgfs_metadata" can be referenced
-// as a foreign key in any tables:
+// as a foreign key in any table. Use an "ON DELETE" constraint to prevent rows from
+// being deleted before the file they reference 44has been removed using [FS.Remove].
 //
 //	CREATE TABLE user_files (
 //		[...]
@@ -16,9 +17,6 @@
 //		FOREIGN KEY (file_id) REFERENCES pgfs_metadata(id) ON DELETE RESTRICT
 //		[...]
 //	);
-//
-// The "ON DELETE RESTRICT" constraint will prevent a row from being deleted before the
-// related file has been removed using [FS.Remove].
 //
 // [Large Objects]: https://www.postgresql.org/docs/current/largeobjects.html
 package pgfs
@@ -142,7 +140,7 @@ func (fsys *FS) rootInfo() (fs.FileInfo, error) {
 		LIMIT 1
 	`
 	fi := &entry{
-		id:    zeroUUID,
+		id:    rootUUID,
 		isDir: true,
 		mode:  fs.ModeDir,
 	}
