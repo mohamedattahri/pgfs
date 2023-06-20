@@ -2,19 +2,19 @@
 // as [Large Objects].
 //
 // [FS] represents a flat file system where files use UUID strings as names.
-// They're meant to be written-once, and used as immutable blobs afterwards.
+// They're meant to be written once, then used as immutable blobs afterwards.
 //
 // Files are stored as large objects, and tracked in a dedicated metadata table
 // called "pgfs_metadata". The table can be created by calling [MigrateUp].
 //
 // To prevent orphaned files, the "id" column in "pgfs_metadata" can be referenced
 // as a foreign key in any table. Use an "ON DELETE" constraint to prevent rows from
-// being deleted before the file they reference 44has been removed using [FS.Remove].
+// being deleted before the file they reference has been removed using [FS.Remove].
 //
 //	CREATE TABLE user_files (
 //		[...]
 //		file_id UUID NOT NULL,
-//		FOREIGN KEY (file_id) REFERENCES pgfs_metadata(id) ON DELETE RESTRICT
+//		FOREIGN KEY (file_id) REFERENCES pgfs_metadata (id) ON DELETE RESTRICT,
 //		[...]
 //	);
 //
@@ -152,7 +152,7 @@ func (fsys *FS) rootInfo() (fs.FileInfo, error) {
 
 }
 
-// Stat returns info on a the given with the given name.
+// Stat returns info on the file with the given name.
 //
 // If name is an empty string, the returned info is on the
 // root directory.
@@ -271,8 +271,15 @@ var (
 // ServeFile serves the content of a file over HTTP.
 //
 // If f is a file created by this package, [http.ServeContent]
-// is used after adding the appropriate headers
-// (ETag, Last-Modified, Content-Type, Repr-Digest).
+// is used after adding the appropriate headers sourced
+// from its [FileInfo].
+//
+//	[...]
+//	ETag: "{ FileInfo.ContentSHA256() }"
+//	Last-Modified: "{ FileInfo.ModTime() }"
+//	Content-Type: "{ FileInfo.ContentType() }"
+//	Repr-Digest: "sha-256=:{ FileInfo.ContentSHA256() }:"
+//	[...]
 func ServeFile(w http.ResponseWriter, r *http.Request, f fs.File) {
 	if handler, ok := f.(http.Handler); ok {
 		handler.ServeHTTP(w, r)
@@ -286,6 +293,11 @@ func ServeFile(w http.ResponseWriter, r *http.Request, f fs.File) {
 	}
 	if err != nil {
 		log.Printf("error reading file stat: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if info.IsDir() {
+		log.Printf("error serving directory")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}

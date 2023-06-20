@@ -20,8 +20,8 @@ const root = "00000000-0000-0000-0000-000000000000"
 var rootUUID = uuid.MustParse(root)
 
 // FileInfo extends [fs.FileInfo] to include metadata
-// about the object. It's the interface returned by
-// [FS.Stat].
+// about the object in the database. It's the
+// interface returned by [FS.Stat].
 type FileInfo interface {
 	fs.FileInfo
 
