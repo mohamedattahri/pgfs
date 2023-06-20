@@ -316,6 +316,107 @@ func TestFSCreateFileExists(t *testing.T) {
 	})
 }
 
+// loopingReader is an [io.Reader]
+// that loops over the same source
+// of data without ever returning
+// io.EOF.
+//
+// Useful because reading from crypto/rand
+// would be too resource intensive for tests.
+type loopingReader struct {
+	src []byte
+	cur int
+}
+
+// Read implements [io.Reader].
+func (r *loopingReader) Read(p []byte) (int, error) {
+	n := 0
+	for n < len(p) {
+		max := len(p) - n
+		if (r.cur + max) > len(r.src) {
+			max = len(r.src) - r.cur
+		}
+		n += copy(p[n:max], r.src[r.cur:r.cur+max])
+	}
+	return n, nil
+}
+
+// Test consists of two steps:
+//
+// (1) Writing a large 100Mb file into the database
+// while computing its sha256 hash;
+// (2) Reading it back from the database while
+// computing another hash that can be compared
+// with the first one.
+func TestFSCreateLargeFile(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		var (
+			name = GenerateUUID()
+			h    = sha256.New()
+		)
+
+		w, err := fsys.Create(name, BinaryType)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		mw := io.MultiWriter(h, w)
+		written, err := io.Copy(mw, io.LimitReader(&loopingReader{src: TestBytes}, 100*1024<<10)) // 100MB
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		wDigest := h.Sum(nil)
+		h.Reset()
+
+		f, err := fsys.Open(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		read, err := io.Copy(h, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+		rDigest := h.Sum(nil)
+
+		if written != read {
+			t.Fatal("Bytes written", written, "Bytes read:", read)
+		}
+
+		if !bytes.Equal(wDigest, rDigest) {
+			t.Fatal("checksums don't match")
+		}
+	})
+}
+
+func TestFSCreateWriteClosedFile(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		w, err := fsys.Create(GenerateUUID(), BinaryType)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(TestBytes); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := w.Write(TestBytes); err != fs.ErrClosed {
+			t.Fatal("expected fs.ErrClosed. Got:", err)
+		}
+		if err := w.Close(); err != fs.ErrClosed {
+			t.Fatal("expected fs.ErrClosed. Got:", err)
+		}
+	})
+}
+
 func TestServeFileObject(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		name := GenerateUUID()
