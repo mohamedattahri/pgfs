@@ -71,15 +71,8 @@ type dir struct {
 	closed bool
 }
 
-// Read implements [http.File].
-func (d *dir) Read(p []byte) (int, error) {
-	return 0, fs.ErrInvalid
-}
-
-// Seek implements [http.File].
-func (d *dir) Seek(offset int64, whence int) (int64, error) {
-	return 0, fs.ErrInvalid
-}
+func (d *dir) Read(p []byte) (int, error)                   { return 0, fs.ErrInvalid }
+func (d *dir) Seek(offset int64, whence int) (int64, error) { return 0, fs.ErrInvalid }
 
 // Close implements [http.File].
 func (d *dir) Close() error {

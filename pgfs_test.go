@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -192,6 +193,7 @@ func TestFileRead(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { f.Close() })
 
 		b, err := io.ReadAll(f)
 		if err != nil {
@@ -201,6 +203,62 @@ func TestFileRead(t *testing.T) {
 		if !bytes.Equal(b, TestBytes) {
 			t.Log(string(b), string(TestBytes))
 			t.Fatal("bytes don't match")
+		}
+	})
+}
+
+func TestFileSeek(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		name := GenerateUUID()
+		createFile(t, fsys, name, BinaryType, nil)
+
+		f, err := fsys.Open(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { f.Close() })
+
+		info, err := f.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		seeker, ok := f.(io.Seeker)
+		if !ok {
+			t.Fatal("file is not an io.Seeker")
+		}
+
+		pos, err := seeker.Seek(0, io.SeekCurrent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pos != 0 {
+			t.Fatal("wrong position. Wanted 0. Got", pos)
+		}
+
+		pos, err = seeker.Seek(0, io.SeekEnd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pos != info.Size() {
+			t.Fatal("wrong position. Wanted:", info.Size(), "Got:", pos)
+		}
+
+		val := int64(math.Ceil(float64(info.Size()) / 2))
+		pos, err = seeker.Seek(-val, io.SeekCurrent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wanted := info.Size() - val; pos != wanted {
+			t.Fatal("wrong position. Wanted:", wanted, "Got:", pos)
+		}
+
+		p, err := io.ReadAll(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wanted := info.Size() - val; int64(len(p)) != wanted {
+			t.Fatal("wrong amount of data read. Wanted:", wanted, "Got:", len(p))
 		}
 	})
 }
@@ -309,8 +367,13 @@ func TestFSCreate(t *testing.T) {
 			t.Fatalf("error closing writer: %v", err)
 		}
 
-		if _, err := fsys.Stat(name); err != nil {
+		info, err := fsys.Stat(name)
+		if err != nil {
 			t.Fatal("error getting info on created file", err)
+		}
+
+		if info.Size() != int64(len(TestBytes)) {
+			t.Fatal("sizes don't match")
 		}
 	})
 }
@@ -386,6 +449,7 @@ func TestFSCreateLargeFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { f.Close() })
 
 		read, err := io.Copy(h, f)
 		if err != nil {
@@ -470,6 +534,7 @@ func TestOpenRoot(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { d.Close() })
 
 		info, err := d.Stat()
 		if err != nil {
