@@ -282,7 +282,7 @@ func (fsys *FS) Open(name string) (fs.File, error) {
 // The content type should be a valid MIME type. such "application/pdf" or
 // "image/png".
 //
-// Custom metadata attributes can be used passed and stored with the file
+// Custom metadata attributes can be passed and stored with the file
 // using sys. They can later be accessed using [fs.FileInfo.Sys]
 // by either opening the file or calling [FS.Stat].
 func (fsys *FS) Create(name, contentType string, sys map[string]string) (io.WriteCloser, error) {

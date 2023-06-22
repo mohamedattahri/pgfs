@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Sys is the type returned by [FileInfo.Sys],
-// and holds the metadata passed with [Fs.Create].
+// Sys is the type returned by [fs.FileInfo.Sys],
+// and holds the metadata passed with [FS.Create].
 type Sys map[string]string
 
 // Scan implements [sql.Scanner], so
