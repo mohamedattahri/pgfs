@@ -14,6 +14,7 @@ type writer struct {
 	fd          int32
 	oid         OID
 	id          uuid.UUID
+	sys         Sys
 	contentType string
 	size        int64
 	hasher      hash.Hash
@@ -42,15 +43,15 @@ func (w *writer) Close() error {
 
 	const q = `
 	  INSERT INTO pgfs_metadata (
-			oid, id, 
+			oid, id, sys,
 			content_size, content_type, content_sha256
 		) 
 		VALUES (
-			$1, $2,
-			$3, $4, $5
+			$1, $2, $3,
+			$4, $5, $6
 		)
   `
-	if _, err := w.fsys.conn.Exec(q, w.oid, w.id, w.size, w.contentType, w.hasher.Sum(nil)); err != nil {
+	if _, err := w.fsys.conn.Exec(q, w.oid, w.id, w.sys, w.size, w.contentType, w.hasher.Sum(nil)); err != nil {
 		return err
 	}
 	if err := close(w.fsys.conn, w.fd); err != nil {

@@ -1,15 +1,30 @@
-// pgfs implements a file system that reads and writes files to Postgres
+// Package pgfs implements a file system that reads and writes files to Postgres
 // as [Large Objects].
 //
-// [FS] represents a flat file system where files use UUID strings as names.
-// They're meant to be written once, then used as immutable blobs afterwards.
+// # Large Objects
 //
-// Files are stored as large objects, and tracked in a dedicated metadata table
-// called "pgfs_metadata". The table can be created by calling [MigrateUp].
+// On Postgres, [Large Objects] offer the ability to store files of any size up to
+// 4GB. While [BYTEA] columns are often easier to use and come with many benefits,
+// they're not an ideal solution when memory is the main constraint.
 //
-// To prevent orphaned files, the "id" column in "pgfs_metadata" can be referenced
-// as a foreign key in any table. Use an "ON DELETE" constraint to prevent rows from
-// being deleted before the file they reference has been removed using [FS.Remove].
+// Large Objects allow large amounts of data to be streamed and processed in chunks,
+// just like a regular local file. As such, they're a perfect fit for the interfaces
+// of the [io] and [fs] packages.
+//
+// # Structure
+//
+// [FS] is organized as flat file system where files use UUID strings as names,
+// and are meant to be written once then used as immutable blobs afterwards.
+//
+// Files are tracked in a dedicated metadata table called "pgfs_metadata".
+// It can be created by calling [MigrateUp], and its schema is contained
+// in the [Up] constant.
+//
+// While Postgres does not currently support referential integrity on [Large Objects],
+// the "pgfs_metadata" table can be referenced by foreign keys to obtain
+// the same guarantees. To that effect, it is recommended to use an "ON DELETE" constraint
+// in order to prevent a row referencing a file from being deleted
+// before it's been formally removed with [FS.Remove].
 //
 //	CREATE TABLE user_files (
 //		[...]
@@ -18,13 +33,38 @@
 //		[...]
 //	);
 //
+// # Metadata
+//
+// Attributes that do not require referential integrity can be stored
+// with each file using the [Sys] map passed when [Fs.Create] is called.
+//
+// It can later be accessed via the [FileInfo] interface, either using [FS.Stat] or
+// by opening the file.
+//
+//	info, err := fsys.Stat("d7f225c4-db00-4b9f-8ed3-82682ca4171c")
+//	if err != nil {
+//	   log.Fatal(err)
+//	}
+//	sys := info.Sys().(pgfs.Sys)
+//	log.Println(sys["custom"])
+//
+// Because [Sys] is stored as a [JSONB] column, metadata can also be queried
+// directly from the "pgfs_metadata" table using the standard
+// [JSON operators] of Postgres.
+//
+//	SELECT sys ->> 'custom' as 'custom'
+//	FROM pgfs_metadata
+//	WHERE id = 'd7f225c4-db00-4b9f-8ed3-82682ca4171c'::uuid
+//
 // [Large Objects]: https://www.postgresql.org/docs/current/largeobjects.html
+// [BYTEA]: https://www.postgresql.org/docs/current/datatype-binary.html
+// [JSONB]: https://www.postgresql.org/docs/current/datatype-json.html
+// [JSON operators]: https://www.postgresql.org/docs/current/functions-json.html#FUNCTIONS-JSON-OP-TABLE
 package pgfs
 
 import (
 	"crypto/sha256"
 	"database/sql"
-	"errors"
 	"io"
 	"io/fs"
 	"log"
@@ -34,6 +74,12 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// root is the UUID assigned to the virtual root
+// directory of the file system.
+const root = "00000000-0000-0000-0000-000000000000"
+
+var rootUUID = uuid.MustParse(root)
 
 // GenerateID returns a new random UUID string.
 func GenerateUUID() string {
@@ -75,8 +121,8 @@ type FS struct {
 
 // New returns a new instance of [FS] bound to
 // a database transaction.
-func New(conn Tx) (*FS, error) {
-	return &FS{conn: conn}, nil
+func New(conn Tx) *FS {
+	return &FS{conn: conn}
 }
 
 // ReadFile returns the content of the file with the
@@ -97,7 +143,8 @@ func (fsys *FS) ReadDir(name string) ([]fs.DirEntry, error) {
 	const q = `
 	  SELECT 
 			id, oid, created_at,
-			content_size, content_type, content_sha256
+			sys, content_size, content_type,
+			content_sha256
 	  FROM pgfs_metadata
 	  ORDER BY id ASC
 	`
@@ -114,6 +161,7 @@ func (fsys *FS) ReadDir(name string) ([]fs.DirEntry, error) {
 			&e.id,
 			&e.oid,
 			&e.createdAt,
+			&e.sys,
 			&e.contentSize,
 			&e.contentType,
 			&e.contentSHA256,
@@ -140,9 +188,8 @@ func (fsys *FS) rootInfo() (fs.FileInfo, error) {
 		LIMIT 1
 	`
 	fi := &entry{
-		id:    rootUUID,
-		isDir: true,
-		mode:  fs.ModeDir,
+		id:   rootUUID,
+		mode: fs.ModeDir,
 	}
 	err := fsys.conn.QueryRow(q).Scan(&fi.createdAt, &fi.contentSize)
 	if err != nil {
@@ -170,28 +217,28 @@ func (fsys *FS) Stat(name string) (fs.FileInfo, error) {
 
 	const q = `
 	  SELECT 
-			oid, created_at,
+			oid, created_at, sys,
 			content_size, content_type, content_sha256
 		FROM pgfs_metadata
 		WHERE id = $1
 	`
 	row := fsys.conn.QueryRow(q, id)
-	info := &entry{
-		id:    id,
-		isDir: false,
-		mode:  fs.ModeIrregular,
+	e := &entry{
+		id:   id,
+		mode: fs.ModeIrregular,
 	}
 	err = row.Scan(
-		&info.oid,
-		&info.createdAt,
-		&info.contentSize,
-		&info.contentType,
-		&info.contentSHA256,
+		&e.oid,
+		&e.createdAt,
+		&e.sys,
+		&e.contentSize,
+		&e.contentType,
+		&e.contentSHA256,
 	)
 	if err == sql.ErrNoRows {
 		err = fs.ErrNotExist
 	}
-	return info, err
+	return e, err
 }
 
 // Open returns the file with the given name.
@@ -229,12 +276,24 @@ func (fsys *FS) Open(name string) (fs.File, error) {
 // name and content type. The caller must close the writer
 // for the operation to complete.
 //
-// Name must be a valid and unique UUID. If an empty string is passed,
-// a random one will be generated and used.
-func (fsys *FS) Create(name, contentType string) (io.WriteCloser, error) {
+// The name must be a valid and unique UUID. If an empty string is passed,
+// a randomly generated one will be used instead.
+//
+// The content type should be a valid MIME type. such "application/pdf" or
+// "image/png".
+//
+// Custom metadata attributes can be used passed and stored with the file
+// using sys. They can later be accessed using [fs.FileInfo.Sys]
+// by either opening the file or calling [FS.Stat].
+func (fsys *FS) Create(name, contentType string, sys map[string]string) (io.WriteCloser, error) {
 	id, err := uuid.Parse(name)
 	if err != nil {
-		return nil, errors.New("name must be a valid UUID string")
+		pErr := &fs.PathError{
+			Op:   "create",
+			Path: name,
+			Err:  err,
+		}
+		return nil, pErr
 	}
 
 	oid, fd, err := create(fsys.conn, id)
@@ -248,6 +307,7 @@ func (fsys *FS) Create(name, contentType string) (io.WriteCloser, error) {
 		fsys:        fsys,
 		hasher:      sha256.New(),
 		id:          id,
+		sys:         sys,
 		contentType: contentType,
 	}
 	return w, nil
@@ -275,10 +335,10 @@ var (
 // from its [FileInfo].
 //
 //	[...]
-//	ETag: "{ FileInfo.ContentSHA256() }"
-//	Last-Modified: "{ FileInfo.ModTime() }"
-//	Content-Type: "{ FileInfo.ContentType() }"
-//	Repr-Digest: "sha-256=:{ FileInfo.ContentSHA256() }:"
+//	Content-Type: application/png                                             // FileInfo.ContentType()
+//	ETag: "0de648a9c8c19264e6cd6a441a867d0989a03929cacec442ad1f0cd192bc9072"  // FileInfo.ContentSHA256()
+//	Last-Modified: Thu, 22 Jun 2023 14:34:35 GMT                              // FileInfo.ModTime()
+//	Repr-Digest: sha-256=:DeZIqcjBkmTmzWpEGoZ9CYmgOSnKzsRCrR8M0ZK8kHI=:       // FileInfo.ContentSHA256()
 //	[...]
 func ServeFile(w http.ResponseWriter, r *http.Request, f fs.File) {
 	if handler, ok := f.(http.Handler); ok {

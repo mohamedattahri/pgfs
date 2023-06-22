@@ -20,6 +20,7 @@ import (
 	_ "embed" // Testing files
 
 	_ "github.com/jackc/pgx/v5/stdlib" // Postgres driver
+	"golang.org/x/exp/maps"
 )
 
 var TestDB *sql.DB
@@ -109,20 +110,15 @@ func withFS(t *testing.T, fn func(fsys *FS)) {
 		}
 	})
 
-	fsys, err := New(tx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fn(fsys)
+	fn(New(tx))
 
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func createFile(t *testing.T, fsys *FS, name, contentType string) {
-	w, err := fsys.Create(name, contentType)
+func createFile(t *testing.T, fsys *FS, name, contentType string, sys Sys) {
+	w, err := fsys.Create(name, contentType, sys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,9 +132,16 @@ func createFile(t *testing.T, fsys *FS, name, contentType string) {
 
 func TestFSStat(t *testing.T) {
 	withFS(t, func(fsys *FS) {
-		name := GenerateUUID()
-		contentType := "image/png"
-		createFile(t, fsys, name, contentType)
+		var (
+			name        = GenerateUUID()
+			contentType = "image/png"
+			sys         = Sys{
+				"a": "1",
+				"b": "2",
+				"c": "3",
+			}
+		)
+		createFile(t, fsys, name, contentType, sys)
 
 		info, err := fsys.Stat(name)
 		if err != nil {
@@ -160,6 +163,14 @@ func TestFSStat(t *testing.T) {
 			t.Fatal("info.Sys is not of type *Sys")
 		}
 
+		m, ok := fi.Sys().(Sys)
+		if !ok {
+			t.Error("not of type Sys")
+		}
+		if !maps.Equal(m, sys) {
+			t.Error("sys doesn't match")
+		}
+
 		if fi.ContentType() != contentType {
 			t.Error("content types don't match. Wanted", contentType, "Got", fi.ContentType())
 		}
@@ -175,7 +186,7 @@ func TestFSStat(t *testing.T) {
 func TestFileRead(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		name := GenerateUUID()
-		createFile(t, fsys, name, BinaryType)
+		createFile(t, fsys, name, BinaryType, nil)
 
 		f, err := fsys.Open(name)
 		if err != nil {
@@ -197,7 +208,7 @@ func TestFileRead(t *testing.T) {
 func TestReadFile(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		name := GenerateUUID()
-		createFile(t, fsys, name, BinaryType)
+		createFile(t, fsys, name, BinaryType, nil)
 
 		b, err := fsys.ReadFile(name)
 		if err != nil {
@@ -234,7 +245,7 @@ func TestFSReaddir(t *testing.T) {
 		for i := 0; i < more; i++ {
 			name := GenerateUUID()
 			wanted = append(wanted, name)
-			createFile(t, fsys, name, BinaryType)
+			createFile(t, fsys, name, BinaryType, nil)
 		}
 
 		got, err := fsys.ReadDir("")
@@ -260,7 +271,7 @@ func TestFSReaddir(t *testing.T) {
 func TestFSRemove(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		name := GenerateUUID()
-		createFile(t, fsys, name, BinaryType)
+		createFile(t, fsys, name, BinaryType, nil)
 
 		if err := fsys.Remove(name); err != nil {
 			t.Fatal(err)
@@ -281,7 +292,7 @@ func TestFSCreate(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		name := GenerateUUID()
 		contentType := "application/pdf"
-		w, err := fsys.Create(name, contentType)
+		w, err := fsys.Create(name, contentType, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -307,9 +318,9 @@ func TestFSCreate(t *testing.T) {
 func TestFSCreateFileExists(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		name := GenerateUUID()
-		createFile(t, fsys, name, BinaryType)
+		createFile(t, fsys, name, BinaryType, nil)
 
-		_, err := fsys.Create(name, BinaryType)
+		_, err := fsys.Create(name, BinaryType, nil)
 		if err != fs.ErrExist {
 			t.Fatal("expected fs.ErrExist. Got", err)
 		}
@@ -355,7 +366,7 @@ func TestFSCreateLargeFile(t *testing.T) {
 			h    = sha256.New()
 		)
 
-		w, err := fsys.Create(name, BinaryType)
+		w, err := fsys.Create(name, BinaryType, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -397,7 +408,7 @@ func TestFSCreateLargeFile(t *testing.T) {
 
 func TestFSCreateWriteClosedFile(t *testing.T) {
 	withFS(t, func(fsys *FS) {
-		w, err := fsys.Create(GenerateUUID(), BinaryType)
+		w, err := fsys.Create(GenerateUUID(), BinaryType, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -420,7 +431,7 @@ func TestFSCreateWriteClosedFile(t *testing.T) {
 func TestServeFileObject(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		name := GenerateUUID()
-		createFile(t, fsys, name, "application/png")
+		createFile(t, fsys, name, "application/png", nil)
 
 		f, err := fsys.Open(name)
 		if err != nil {
@@ -452,7 +463,7 @@ func TestServeFileObject(t *testing.T) {
 func TestOpenRoot(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		for i := 0; i < 100; i++ {
-			createFile(t, fsys, GenerateUUID(), BinaryType)
+			createFile(t, fsys, GenerateUUID(), BinaryType, nil)
 		}
 
 		d, err := fsys.Open("")
@@ -486,7 +497,7 @@ func TestOpenRoot(t *testing.T) {
 func TestWalkFunc(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		for i := 0; i < 100; i++ {
-			createFile(t, fsys, GenerateUUID(), BinaryType)
+			createFile(t, fsys, GenerateUUID(), BinaryType, nil)
 		}
 
 		seen := 0

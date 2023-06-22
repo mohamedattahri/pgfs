@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"io"
 	"log"
+	"os"
 
 	"mohamed.attahri.com/pgfs"
 )
@@ -17,13 +18,23 @@ func ExampleFS_Create() {
 	}
 	defer tx.Rollback()
 
-	fsys, err := pgfs.New(tx)
+	img, err := os.Open("testing/gopher.png")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer img.Close()
+
+	sys := pgfs.Sys{
+		"Description": "The Go Gopher",
+		"Credit":      "Renee French",
+		"Year":        "2009",
+	}
+	w, err := pgfs.New(tx).Create(pgfs.GenerateUUID(), "image/png", sys)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	w, err := fsys.Create(pgfs.GenerateUUID(), "text/plain")
-	if _, err := io.WriteString(w, "Bonjour!"); err != nil {
+	if _, err := io.Copy(w, img); err != nil {
 		log.Fatal(err)
 	}
 	if err := w.Close(); err != nil {

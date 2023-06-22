@@ -2,8 +2,10 @@ package pgfs
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -13,11 +15,36 @@ import (
 	"github.com/google/uuid"
 )
 
-// root is the UUID assigned to the virtual root
-// directory of the file system.
-const root = "00000000-0000-0000-0000-000000000000"
+// Sys is the type returned by [FileInfo.Sys],
+// and holds the metadata passed with [Fs.Create].
+type Sys map[string]string
 
-var rootUUID = uuid.MustParse(root)
+// Scan implements [sql.Scanner], so
+// sys can be populated from the content
+// of a JSONB column.
+func (sys *Sys) Scan(data any) error {
+	if data == nil {
+		return nil
+	}
+
+	if sys == nil {
+		*sys = make(Sys)
+	}
+	b, ok := data.([]byte)
+	if !ok {
+		return fmt.Errorf("cannot cast data as []byte")
+	}
+	return json.Unmarshal(b, sys)
+}
+
+// Value implements [driver.Valuer] so sys
+// can be stored as a JSONB column.
+func (sys Sys) Value() (driver.Value, error) {
+	if sys == nil {
+		return nil, nil
+	}
+	return json.Marshal(sys)
+}
 
 // FileInfo extends [fs.FileInfo] to include metadata
 // about the object in the database. It's the
@@ -46,12 +73,12 @@ type dir struct {
 
 // Read implements [http.File].
 func (d *dir) Read(p []byte) (int, error) {
-	return 0, io.EOF
+	return 0, fs.ErrInvalid
 }
 
 // Seek implements [http.File].
 func (d *dir) Seek(offset int64, whence int) (int64, error) {
-	return 0, nil
+	return 0, fs.ErrInvalid
 }
 
 // Close implements [http.File].
@@ -72,7 +99,7 @@ func (d *dir) Stat() (fs.FileInfo, error) {
 func (d *dir) Readdir(n int) (entries []fs.FileInfo, err error) {
 	const q = `
 	  SELECT 
-			id, oid, created_at,
+			id, oid, created_at, sys,
 			content_size, content_type, content_sha256
 	  FROM pgfs_metadata
 	  ORDER BY id ASC
@@ -87,13 +114,13 @@ func (d *dir) Readdir(n int) (entries []fs.FileInfo, err error) {
 	defer rows.Close()
 	for rows.Next() {
 		e := &entry{
-			isDir: false,
-			mode:  fs.ModeIrregular,
+			mode: 0,
 		}
 		err = rows.Scan(
 			&e.id,
 			&e.oid,
 			&e.createdAt,
+			&e.sys,
 			&e.contentSize,
 			&e.contentType,
 			&e.contentSHA256,
@@ -128,11 +155,11 @@ type entry struct {
 	oid           OID
 	id            uuid.UUID
 	createdAt     time.Time
-	isDir         bool
 	mode          fs.FileMode
 	contentType   string
 	contentSize   int64
 	contentSHA256 []byte
+	sys           Sys
 }
 
 func (e *entry) Info() (fs.FileInfo, error) { return e, nil }
@@ -140,9 +167,9 @@ func (e *entry) Type() fs.FileMode          { return e.Mode() }
 func (e *entry) Name() string               { return e.id.String() }
 func (e *entry) Size() int64                { return e.contentSize }
 func (e *entry) ModTime() time.Time         { return e.createdAt }
-func (e *entry) IsDir() bool                { return e.isDir }
+func (e *entry) IsDir() bool                { return e.mode.IsDir() }
 func (e *entry) Mode() fs.FileMode          { return e.mode }
-func (e *entry) Sys() any                   { return nil }
+func (e *entry) Sys() any                   { return e.sys }
 func (e *entry) ContentSHA256() []byte      { return e.contentSHA256 }
 func (e *entry) ContentType() string        { return e.contentType }
 func (e *entry) OID() OID                   { return e.oid }

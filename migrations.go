@@ -8,11 +8,11 @@ const Table = "pgfs_metadata"
 const Up = `
 	CREATE EXTENSION IF NOT EXISTS lo;
 	CREATE TABLE IF NOT EXISTS pgfs_metadata (
-		id UUID NOT NULL PRIMARY KEY DEFAULT GEN_RANDOM_UUID(),
+		id UUID NOT NULL PRIMARY KEY,
 		oid OID NOT NULL UNIQUE,
 		created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-		opened_at TIMESTAMP NOT NULL DEFAULT NOW(),
-		content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+		sys JSONB,
+		content_type TEXT NOT NULL,
 		content_size BIGINT NOT NULL,
 		content_sha256 BYTEA NOT NULL
 	);
