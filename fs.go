@@ -13,7 +13,7 @@
 //
 // # Structure
 //
-// [FS] is organized as flat file system where files use UUID strings as names,
+// [FS] is organized as a flat file system where files use UUID strings as names,
 // and are meant to be written once then used as immutable blobs afterwards.
 //
 // Files are tracked in a dedicated metadata table called "pgfs_metadata".
@@ -36,7 +36,7 @@
 // # Metadata
 //
 // Attributes that do not require referential integrity can be stored
-// with each file using the [Sys] map passed when [Fs.Create] is called.
+// with each file using the [Sys] map passed when [FS.Create] is called.
 //
 // It can later be accessed via the [FileInfo] interface, either using [FS.Stat] or
 // by opening the file.

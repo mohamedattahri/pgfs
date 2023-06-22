@@ -1,7 +1,7 @@
 package pgfs
 
 // Table is the name of the metadata table.
-// that is created when [Migrate] is called.
+// that is created when [MigrateUp] is called.
 const Table = "pgfs_metadata"
 
 // Up is the SQL query executed by [MigrateUp].
@@ -21,8 +21,7 @@ const Up = `
 // Down is the SQL query executed by [MigrateDown].
 const Down = "DROP TABLE pgfs_metadata;"
 
-// MigrateUp upgrades the database schema for
-// to store files using [FS].
+// MigrateUp executed the SQL query in [Up].
 //
 // Calling MigrateUp multiple times has no effect.
 func MigrateUp(conn Tx) error {
@@ -30,8 +29,7 @@ func MigrateUp(conn Tx) error {
 	return err
 }
 
-// MigrateDown undoes the database schema
-// changes made by [MigrateUp].
+// MigrateDown executes the SQL query in [Down].
 func MigrateDown(conn Tx) error {
 	_, err := conn.Exec(Up)
 	return err
