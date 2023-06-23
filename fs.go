@@ -13,8 +13,9 @@
 //
 // # Structure
 //
-// [FS] is organized as a flat file system where files use UUID strings as names,
-// and are meant to be written once then used as immutable blobs afterwards.
+// [FS] is organized as a flat file system where files use UUID strings as names.
+// They're meant to be written once, and used as immutable read-only blobs
+// afterwards.
 //
 // Files are tracked in a dedicated metadata table called "pgfs_metadata".
 // It can be created by calling [MigrateUp], and its schema is contained
@@ -190,11 +191,10 @@ func (fsys *FS) rootInfo() (fs.FileInfo, error) {
 		mode: fs.ModeDir,
 	}
 	err := fsys.conn.QueryRow(q).Scan(&fi.createdAt, &fi.contentSize)
-	if err != nil {
+	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
 	return fi, nil
-
 }
 
 // Stat returns info on the file with the given name.
@@ -223,7 +223,7 @@ func (fsys *FS) Stat(name string) (fs.FileInfo, error) {
 	row := fsys.conn.QueryRow(q, id)
 	e := &entry{
 		id:   id,
-		mode: fs.ModeIrregular,
+		mode: 0,
 	}
 	err = row.Scan(
 		&e.oid,
@@ -345,7 +345,7 @@ func ServeFile(w http.ResponseWriter, r *http.Request, f fs.File) {
 	}
 
 	info, err := f.Stat()
-	if err != fs.ErrNotExist {
+	if err == fs.ErrNotExist {
 		http.NotFound(w, r)
 		return
 	}

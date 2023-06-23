@@ -100,6 +100,10 @@ func (d *dir) Readdir(n int) (entries []fs.FileInfo, err error) {
 	`
 	var rows *sql.Rows
 	rows, err = d.fsys.conn.Query(q, d.cur, n)
+	if err == sql.ErrNoRows {
+		err = io.EOF
+		return
+	}
 	if err != nil {
 		return
 	}
@@ -118,6 +122,10 @@ func (d *dir) Readdir(n int) (entries []fs.FileInfo, err error) {
 			&e.contentType,
 			&e.contentSHA256,
 		)
+		if err == sql.ErrNoRows {
+			err = nil
+			break
+		}
 		if err != nil {
 			return
 		}
@@ -125,7 +133,9 @@ func (d *dir) Readdir(n int) (entries []fs.FileInfo, err error) {
 		d.cur++
 	}
 
-	err = io.EOF
+	if len(entries) < n {
+		err = io.EOF
+	}
 	return
 }
 

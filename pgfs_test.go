@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"embed"
 	"encoding/base64"
 	"encoding/hex"
 	"io"
@@ -18,13 +19,14 @@ import (
 	"testing"
 	"time"
 
-	_ "embed" // Testing files
-
 	_ "github.com/jackc/pgx/v5/stdlib" // Postgres driver
 	"golang.org/x/exp/maps"
 )
 
 var TestDB *sql.DB
+
+//go:embed testing
+var TestFS embed.FS
 
 //go:embed testing/gopher.png
 var TestBytes []byte
@@ -131,6 +133,22 @@ func createFile(t *testing.T, fsys *FS, name, contentType string, sys Sys) {
 	}
 }
 
+func TestValidPath(t *testing.T) {
+	testCases := map[string]bool{
+		GenerateUUID():          true,
+		"":                      true,
+		"hello":                 false,
+		"12345":                 false,
+		GenerateUUID() + "1234": false,
+	}
+
+	for name, wanted := range testCases {
+		if got := ValidPath(name); wanted != got {
+			t.Error("Name:", name, "Wanted:", wanted, "Got:", got)
+		}
+	}
+}
+
 func TestFSStat(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		var (
@@ -157,6 +175,12 @@ func TestFSStat(t *testing.T) {
 		}
 		if info.ModTime().IsZero() {
 			t.Error("time is zero")
+		}
+		if info.IsDir() {
+			t.Error("file is not a dir")
+		}
+		if !info.Mode().IsRegular() {
+			t.Error("file should be regular")
 		}
 
 		fi, ok := info.(FileInfo)
@@ -492,36 +516,80 @@ func TestFSCreateWriteClosedFile(t *testing.T) {
 	})
 }
 
-func TestServeFileObject(t *testing.T) {
+func TestHTTPHandler(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		name := GenerateUUID()
 		createFile(t, fsys, name, "application/png", nil)
 
-		f, err := fsys.Open(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer f.Close()
-		ff := f.(*file)
+		var (
+			f    *file
+			info FileInfo
+		)
+		{
+			ff, err := fsys.Open(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ff.Close()
+			f = ff.(*file)
 
-		r := httptest.NewRequest(http.MethodGet, "https://example.com", nil)
-		w := httptest.NewRecorder()
-		ff.ServeHTTP(w, r)
-		resp := w.Result()
-
-		tests := map[string]string{
-			"Content-Type":  ff.info.contentType,
-			"Last-Modified": ff.info.createdAt.Format(http.TimeFormat),
-			"Repr-Digest":   "sha-256=:" + base64.StdEncoding.EncodeToString(ff.info.contentSHA256) + ":",
-			"ETag":          "\"" + hex.EncodeToString(ff.info.contentSHA256) + "\"",
+			fi, err := f.Stat()
+			if err != nil {
+				t.Fatal(err)
+			}
+			info = fi.(FileInfo)
 		}
-		for name, wanted := range tests {
-			got := resp.Header.Get(name)
-			if wanted != got {
-				t.Error("header", name, "Wanted", wanted, "Got", got)
+
+		assertFn := func(t *testing.T, resp *http.Response) {
+			tests := map[string]string{
+				"Content-Type":  info.ContentType(),
+				"Last-Modified": info.ModTime().Format(http.TimeFormat),
+				"Repr-Digest":   "sha-256=:" + base64.StdEncoding.EncodeToString(info.ContentSHA256()) + ":",
+				"ETag":          "\"" + hex.EncodeToString(info.ContentSHA256()) + "\"",
+			}
+			for name, wanted := range tests {
+				got := resp.Header.Get(name)
+				if wanted != got {
+					t.Error("header", name, "Wanted", wanted, "Got", got)
+				}
 			}
 		}
+
+		t.Run("File HTTP handler", func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "https://example.com", nil)
+			w := httptest.NewRecorder()
+			f.ServeHTTP(w, r)
+			resp := w.Result()
+			assertFn(t, resp)
+		})
+
+		t.Run("Serve File handler", func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "https://example.com", nil)
+			w := httptest.NewRecorder()
+			ServeFile(w, r, f)
+			resp := w.Result()
+			assertFn(t, resp)
+		})
 	})
+}
+
+func TestServeFile(t *testing.T) {
+	// scenario for *file is covered in TestHTTPHandler.
+
+	f, err := TestFS.Open("testing/gopher.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	r := httptest.NewRequest(http.MethodGet, "https://example.com", nil)
+	w := httptest.NewRecorder()
+	ServeFile(w, r, f)
+	resp := w.Result()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatal(resp.StatusCode)
+	}
 }
 
 func TestOpenRoot(t *testing.T) {
@@ -555,6 +623,57 @@ func TestOpenRoot(t *testing.T) {
 
 		if wanted := 100 * len(TestBytes); info.Size() <= int64(wanted) {
 			t.Error("size is lower than expected", "Got", info.Size(), "Wanted >=", wanted)
+		}
+	})
+}
+
+// Test strategy:
+//
+// Get the list of all the files available
+// with ReadDir, then deleted them all.
+// If calling ReadDir again yields no files,
+// it means that all the files available
+// were returned.
+func TestRootReadDir(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		root, err := fsys.Open("")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r, ok := root.(fs.ReadDirFile)
+		if !ok {
+			t.Fatal("root does not implement fs.ReadDirFile")
+		}
+
+		for i := 0; i < 20; i++ {
+			createFile(t, fsys, GenerateUUID(), BinaryType, nil)
+		}
+
+		all := make([]fs.DirEntry, 0)
+		for {
+			entries, err := r.ReadDir(10)
+			all = append(all, entries...)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		for _, e := range all {
+			if err := fsys.Remove(e.Name()); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		entries, err := r.ReadDir(10)
+		if err != io.EOF {
+			t.Fatal("expected io.EOF. Got:", err)
+		}
+		if len(entries) != 0 {
+			t.Fatal("expected 0 files in the fsys. Got:", len(entries))
 		}
 	})
 }
