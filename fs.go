@@ -70,8 +70,6 @@ import (
 	"log"
 	"net/http"
 
-	_ "embed"
-
 	"github.com/google/uuid"
 )
 
@@ -81,7 +79,7 @@ const root = "00000000-0000-0000-0000-000000000000"
 
 var rootUUID = uuid.MustParse(root)
 
-// GenerateID returns a new random UUID string.
+// GenerateUUID returns a new random UUID string.
 func GenerateUUID() string {
 	return uuid.New().String()
 }
