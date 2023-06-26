@@ -273,11 +273,13 @@ func (fsys *FS) Open(name string) (fs.File, error) {
 // name and content type. The caller must close the writer
 // for the operation to complete.
 //
-// The name must be a valid and unique UUID. If an empty string is passed,
-// a randomly generated one will be used instead.
+// The name must be a valid and unique UUID.
 //
-// The content type should be a valid MIME type, such as "application/pdf" or
-// "image/png".
+// The content type should be a valid MIME type, such as
+// "application/pdf" or "image/png". If an empty string is passed,
+// [http.DetectContentType] will be used to try to make a guess
+// from the first 512 bytes of data written. If no value can be
+// determined, [BinaryType] will be used as a default value.
 //
 // Custom metadata attributes can be passed and stored with the file
 // using sys. They can later be accessed using [fs.FileInfo.Sys]

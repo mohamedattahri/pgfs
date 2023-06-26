@@ -516,6 +516,32 @@ func TestFSCreateWriteClosedFile(t *testing.T) {
 	})
 }
 
+func TestFSCreateEmptyContentType(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		name := GenerateUUID()
+		w, err := fsys.Create(name, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(TestBytes); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		writer := w.(*writer)
+		if len(writer.tag) > fileTagSize {
+			t.Fatal("tag is bigger than expected")
+		}
+
+		got := writer.contentType
+		if wanted := "image/png"; wanted != got {
+			t.Fatal("Wanted:", wanted, "Got:", got)
+		}
+	})
+}
+
 func TestHTTPHandler(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		name := GenerateUUID()

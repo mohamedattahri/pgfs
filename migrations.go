@@ -12,7 +12,7 @@ const Up = `
 		oid OID NOT NULL UNIQUE,
 		created_at TIMESTAMP NOT NULL DEFAULT NOW(),
 		sys JSONB,
-		content_type TEXT NOT NULL,
+		content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
 		content_size BIGINT NOT NULL,
 		content_sha256 BYTEA NOT NULL
 	);
