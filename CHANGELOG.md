@@ -1,5 +1,9 @@
 # CHANGE LOG
 
+## v0.6.1
+
+- Fixed issue with `ServeFile` not using `http.ServeContent` when possible;
+
 ## v0.6.0
 
 - Improved `FS.Create` with the ability to guess content types.

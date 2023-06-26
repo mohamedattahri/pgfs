@@ -361,7 +361,7 @@ func ServeFile(w http.ResponseWriter, r *http.Request, f fs.File) {
 		return
 	}
 
-	if rsc, ok := f.(io.ReadWriteSeeker); ok {
+	if rsc, ok := f.(io.ReadSeekCloser); ok {
 		http.ServeContent(w, r, info.Name(), info.ModTime(), rsc)
 		return
 	}
