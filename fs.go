@@ -1,5 +1,5 @@
-// Package pgfs implements a file system that reads and writes files to Postgres
-// as [Large Objects].
+// Package pgfs implements an [fs.FS]-compatible file system that reads and writes
+// files to Postgres as [Large Objects].
 //
 // # Large Objects
 //
@@ -14,14 +14,13 @@
 // # Structure
 //
 // [FS] is organized as a flat file system where files use UUID strings as names.
-// They're meant to be written once, and used as immutable read-only blobs
-// afterwards.
 //
-// Files are tracked in a dedicated metadata table called "pgfs_metadata".
-// It can be created by calling [MigrateUp], and its schema is contained
-// in the [Up] constant.
+// Files are meant to be written once, and used as immutable read-only blobs
+// afterwards. They're tracked in a dedicated metadata table called "pgfs_metadata",
+// which can be created by calling [MigrateUp]. See the [Up] constant for more
+// information on the schema used.
 //
-// While Postgres does not currently support referential integrity on [Large Objects],
+// While Postgres does not currently support referential integrity for [Large Objects],
 // the "pgfs_metadata" table can be referenced by foreign keys to obtain
 // the same guarantees. To that effect, it is recommended to use an "ON DELETE" constraint
 // in order to prevent a row referencing a file from being deleted
@@ -277,7 +276,7 @@ func (fsys *FS) Open(name string) (fs.File, error) {
 // The name must be a valid and unique UUID. If an empty string is passed,
 // a randomly generated one will be used instead.
 //
-// The content type should be a valid MIME type. such "application/pdf" or
+// The content type should be a valid MIME type, such as "application/pdf" or
 // "image/png".
 //
 // Custom metadata attributes can be passed and stored with the file

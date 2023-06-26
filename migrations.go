@@ -1,7 +1,7 @@
 package pgfs
 
-// Table is the name of the metadata table.
-// that is created when [MigrateUp] is called.
+// Table is the name of the metadata table
+// created when [MigrateUp] is called.
 const Table = "pgfs_metadata"
 
 // Up is the SQL query executed by [MigrateUp].
