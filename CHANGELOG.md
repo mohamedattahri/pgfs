@@ -1,5 +1,10 @@
 # CHANGE LOG
 
+## v1.0.0
+
+- Fixed issue with type detection;
+- Improved documentation.
+
 ## v0.6.1
 
 - Fixed issue with `ServeFile` not using `http.ServeContent` when possible;
