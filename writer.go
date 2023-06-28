@@ -60,11 +60,7 @@ func (w *writer) Close() error {
 	}
 
 	if w.contentType == "" {
-		if t := http.DetectContentType(w.tag); t != "" {
-			w.contentType = t
-		} else {
-			t = BinaryType
-		}
+		w.contentType = http.DetectContentType(w.tag)
 	}
 
 	const q = `

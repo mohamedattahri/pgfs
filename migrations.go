@@ -21,7 +21,7 @@ const Up = `
 // Down is the SQL query executed by [MigrateDown].
 const Down = "DROP TABLE pgfs_metadata;"
 
-// MigrateUp executed the SQL query in [Up].
+// MigrateUp executes the SQL query in [Up].
 //
 // Calling MigrateUp multiple times has no effect.
 func MigrateUp(conn Tx) error {

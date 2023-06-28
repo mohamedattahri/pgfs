@@ -22,7 +22,7 @@
 //
 // While Postgres does not currently support referential integrity for [Large Objects],
 // the "pgfs_metadata" table can be referenced by foreign keys to obtain
-// the same guarantees. To that effect, it is recommended to use an "ON DELETE" constraint
+// the same guarantees. To that effect, it is recommended to use an [ON DELETE] constraint
 // in order to prevent a row referencing a file from being deleted
 // before it's been formally removed with [FS.Remove].
 //
@@ -60,6 +60,8 @@
 // [BYTEA]: https://www.postgresql.org/docs/current/datatype-binary.html
 // [JSONB]: https://www.postgresql.org/docs/current/datatype-json.html
 // [JSON operators]: https://www.postgresql.org/docs/current/functions-json.html#FUNCTIONS-JSON-OP-TABLE
+//
+// [ON DELETE]: https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-FK
 package pgfs
 
 import (
