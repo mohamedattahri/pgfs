@@ -5,9 +5,11 @@
 
 version: 2
 updates:
-  - package-ecosystem: "gomod" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "gomod"
+    directory: "/"
     assignees:
       - "mohamedattahri"
+    ignore:
+      - dependency-name: "github.com/jackc/pgx/v5"
     schedule:
       interval: "daily"
