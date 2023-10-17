@@ -1,5 +1,11 @@
 # CHANGE LOG
 
+## v1.0.1
+
+- Upgraded dependencies;
+- Improved test coverage;
+- Improved documentation.
+
 ## v1.0.0
 
 - Fixed issue with type detection;
