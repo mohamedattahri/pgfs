@@ -9,10 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// fileTagSize represents the max number of bytes needed
-// to guess the mimetype of a file using [http.DetectContentType].
-const fileTagSize = 512
-
 // writer writes data in a large object,
 // and inserts a row in the metadata table
 // when closed.
@@ -40,13 +36,11 @@ func (w *writer) Write(b []byte) (n int, err error) {
 	w.size += int64(n)
 	w.hasher.Write(b[:n])
 
-	// Store up to 512 in w.tag of data
-	// to guess the content type if none was
-	// provided.
+	// Store up to 512b for [http.DetectContentType].
 	if w.contentType == "" {
-		if m := fileTagSize - len(w.tag); n > 0 && m > 0 {
-			m = int(math.Min(float64(n), float64(m)))
-			w.tag = append(w.tag, b[:m]...)
+		if m := 512 - len(w.tag); n > 0 && m > 0 {
+			i := int(math.Min(float64(n), float64(m)))
+			w.tag = append(w.tag, b[:i]...)
 		}
 	}
 

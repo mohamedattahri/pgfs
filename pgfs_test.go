@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +21,6 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // Postgres driver
-	"golang.org/x/exp/maps"
 )
 
 var TestDB *sql.DB
@@ -103,6 +103,8 @@ func reset(db *sql.DB) error {
 }
 
 func withFS(t *testing.T, fn func(fsys *FS)) {
+	t.Helper()
+
 	tx, err := TestDB.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -121,6 +123,8 @@ func withFS(t *testing.T, fn func(fsys *FS)) {
 }
 
 func createFile(t *testing.T, fsys *FS, name, contentType string, sys Sys) {
+	t.Helper()
+
 	w, err := fsys.Create(name, contentType, sys)
 	if err != nil {
 		t.Fatal(err)
@@ -303,6 +307,15 @@ func TestReadFile(t *testing.T) {
 	})
 }
 
+func TestFSOpenBadName(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		_, err := fsys.Open("bad name")
+		if err != fs.ErrNotExist {
+			t.Fatal("expected fs.ErrNotExist", err)
+		}
+	})
+}
+
 func TestFSRemoveNotExist(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		err := fsys.Remove(GenerateUUID())
@@ -361,6 +374,15 @@ func TestFSRemove(t *testing.T) {
 	})
 }
 
+func TestFSRemoveBadName(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		err := fsys.Remove("bad name")
+		if err != fs.ErrNotExist {
+			t.Fatal("expected fs.ErrNotExit. Got", err)
+		}
+	})
+}
+
 func TestFSStatNotExist(t *testing.T) {
 	withFS(t, func(fsys *FS) {
 		_, err := fsys.Stat(GenerateUUID())
@@ -398,6 +420,14 @@ func TestFSCreate(t *testing.T) {
 
 		if info.Size() != int64(len(TestBytes)) {
 			t.Fatal("sizes don't match")
+		}
+	})
+}
+func TestFSCreateBadName(t *testing.T) {
+	withFS(t, func(fsys *FS) {
+		_, err := fsys.Create("bad name", "", nil)
+		if _, ok := err.(*fs.PathError); !ok {
+			t.Fatal("expected path error")
 		}
 	})
 }
@@ -531,7 +561,7 @@ func TestFSCreateEmptyContentType(t *testing.T) {
 		}
 
 		writer := w.(*writer)
-		if len(writer.tag) > fileTagSize {
+		if len(writer.tag) > 512 {
 			t.Fatal("tag is bigger than expected")
 		}
 

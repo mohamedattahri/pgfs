@@ -5,11 +5,9 @@
 //
 // On Postgres, [Large Objects] offer the ability to store files of any size up to
 // 4GB. While [BYTEA] columns are often easier to use and come with many benefits,
-// they're not an ideal solution when memory is the main constraint.
-//
-// Large Objects allow large amounts of data to be streamed and processed in chunks,
-// just like a regular local file. As such, they're a perfect fit for the interfaces
-// of the [io] and [fs] packages.
+// [Large Objects] allow content to be streamed and processed in chunks, just like
+// a regular local file. As such, they're a perfect fit for the interfaces of the
+// [io] and [fs] packages.
 //
 // # Structure
 //
@@ -17,8 +15,8 @@
 //
 // Files are meant to be written once, and used as immutable read-only blobs
 // afterwards. They're tracked in a dedicated metadata table called "pgfs_metadata",
-// which can be created by calling [MigrateUp]. See the [Up] constant for more
-// information on the schema used.
+// which can be created by calling [MigrateUp]. See [Up] for more information
+// on the schema used.
 //
 // While Postgres does not currently support referential integrity for [Large Objects],
 // the "pgfs_metadata" table can be referenced by foreign keys to obtain
@@ -46,13 +44,13 @@
 //	   log.Fatal(err)
 //	}
 //	sys := info.Sys().(pgfs.Sys)
-//	log.Println(sys["custom"])
+//	log.Println(sys["someAttribute"])
 //
 // Because [Sys] is stored as a [JSONB] column, metadata can also be queried
 // directly from the "pgfs_metadata" table using the standard
 // [JSON operators] of Postgres.
 //
-//	SELECT sys ->> 'custom' as 'custom'
+//	SELECT sys ->> 'someAttribute' as 'someAttribute'
 //	FROM pgfs_metadata
 //	WHERE id = 'd7f225c4-db00-4b9f-8ed3-82682ca4171c'::uuid
 //
@@ -103,7 +101,7 @@ var _ Tx = &sql.Tx{}
 // ValidPath is analog to [fs.ValidPath], and checks
 // if name is a valid UUID.
 func ValidPath(name string) bool {
-	if name == "" {
+	if name == "" { // root directory
 		return true
 	}
 	_, err := uuid.Parse(name)
@@ -278,9 +276,8 @@ func (fsys *FS) Open(name string) (fs.File, error) {
 //
 // The content type should be a valid MIME type, such as
 // "application/pdf" or "image/png". If an empty string is passed,
-// [http.DetectContentType] will be used to try to make a guess
-// from the first 512 bytes of data written. If no value can be
-// determined, [BinaryType] will be used as a default value.
+// [http.DetectContentType] will be used to make a guess
+// from the first 512 bytes of data written.
 //
 // Custom metadata attributes can be passed and stored with the file
 // using sys. They can later be accessed using [fs.FileInfo.Sys]
@@ -347,10 +344,6 @@ func ServeFile(w http.ResponseWriter, r *http.Request, f fs.File) {
 	}
 
 	info, err := f.Stat()
-	if err == fs.ErrNotExist {
-		http.NotFound(w, r)
-		return
-	}
 	if err != nil {
 		log.Printf("error reading file stat: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
