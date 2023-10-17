@@ -11,7 +11,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"maps"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +20,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // Postgres driver
+	"golang.org/x/exp/maps"
 )
 
 var TestDB *sql.DB
