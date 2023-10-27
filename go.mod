@@ -3,7 +3,7 @@ module mohamed.attahri.com/pgfs
 go 1.20
 
 require (
-	github.com/google/uuid v1.3.1
+	github.com/google/uuid v1.4.0
 	github.com/jackc/pgx/v5 v5.4.3
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
 )
